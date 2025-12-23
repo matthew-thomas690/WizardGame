@@ -23,6 +23,7 @@ public static class LevelParser
         var diggerUses = 0;
         var basherUses = 0;
         var minerUses = 0;
+        var bomberUses = 0;
         var gridLines = new List<string>();
 
         var index = 0;
@@ -40,7 +41,7 @@ public static class LevelParser
                 break;
             }
 
-            ParseHeaderLine(line[1..], ref totalLemmings, ref requiredToSave, ref spawnIntervalTicks, ref builderUses, ref diggerUses, ref basherUses, ref minerUses);
+            ParseHeaderLine(line[1..], ref totalLemmings, ref requiredToSave, ref spawnIntervalTicks, ref builderUses, ref diggerUses, ref basherUses, ref minerUses, ref bomberUses);
             index++;
         }
 
@@ -121,7 +122,7 @@ public static class LevelParser
             throw new FormatException("Spawn interval must be greater than zero.");
         }
 
-        return new Level(world, spawns, exits, totalLemmings, requiredToSave, spawnIntervalTicks, builderUses, diggerUses, basherUses, minerUses);
+        return new Level(world, spawns, exits, totalLemmings, requiredToSave, spawnIntervalTicks, builderUses, diggerUses, basherUses, minerUses, bomberUses);
     }
 
     private static void ParseHeaderLine(
@@ -132,7 +133,8 @@ public static class LevelParser
         ref int builderUses,
         ref int diggerUses,
         ref int basherUses,
-        ref int minerUses)
+        ref int minerUses,
+        ref int bomberUses)
     {
         var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
         if (parts.Length != 2 || parts[0].Length == 0)
@@ -209,6 +211,15 @@ public static class LevelParser
                 }
 
                 minerUses = value;
+                break;
+            case "bombers":
+            case "bomber_uses":
+                if (value < 0)
+                {
+                    throw new FormatException("Bomber uses cannot be negative.");
+                }
+
+                bomberUses = value;
                 break;
             default:
                 throw new FormatException($"Unknown header key '{parts[0]}'.");

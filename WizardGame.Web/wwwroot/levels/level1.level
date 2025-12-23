@@ -130167,6 +130167,7 @@
     "builderUses": 5,
     "diggerUses": 4,
     "basherUses": 5,
-    "minerUses": 5
+    "minerUses": 5,
+    "bomberUses": 5
   }
 }

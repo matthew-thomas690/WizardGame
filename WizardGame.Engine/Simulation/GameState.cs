@@ -24,6 +24,7 @@ public sealed class GameState
         DiggersRemaining = level.DiggerUses;
         BashersRemaining = level.BasherUses;
         MinersRemaining = level.MinerUses;
+        BombersRemaining = level.BomberUses;
         NextSpawnTick = 0;
     }
 
@@ -41,6 +42,7 @@ public sealed class GameState
     public int DiggersRemaining { get; private set; }
     public int BashersRemaining { get; private set; }
     public int MinersRemaining { get; private set; }
+    public int BombersRemaining { get; private set; }
     public LemmingSettings LemmingSettings { get; }
     internal long NextSpawnTick { get; set; }
     internal int NextSpawnIndex { get; set; }
@@ -223,6 +225,36 @@ public sealed class GameState
             if (lemming.TryStartMiner())
             {
                 MinersRemaining--;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryAssignBomberAt(float worldX, float worldY)
+    {
+        if (BombersRemaining <= 0)
+        {
+            return false;
+        }
+
+        for (var i = _lemmings.Count - 1; i >= 0; i--)
+        {
+            var lemming = _lemmings[i];
+            if (!lemming.IsAlive || lemming.IsBombing)
+            {
+                continue;
+            }
+
+            if (!ContainsPoint(lemming, worldX, worldY))
+            {
+                continue;
+            }
+
+            if (lemming.TryStartBomber())
+            {
+                BombersRemaining--;
                 return true;
             }
         }

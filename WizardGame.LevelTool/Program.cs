@@ -30,6 +30,7 @@ internal static class Program
         int? diggerUses = null;
         int? basherUses = null;
         int? minerUses = null;
+        int? bomberUses = null;
 
         for (var index = 2; index < args.Length; index++)
         {
@@ -112,6 +113,15 @@ internal static class Program
 
                     minerUses = miners;
                     break;
+                case "--bombers":
+                    if (!int.TryParse(value, out var bombers) || bombers < 0)
+                    {
+                        Console.Error.WriteLine("Bomber uses must be a non-negative integer.");
+                        return ExitFailure;
+                    }
+
+                    bomberUses = bombers;
+                    break;
                 default:
                     Console.Error.WriteLine($"Unknown option '{arg}'.");
                     return ExitFailure;
@@ -125,7 +135,7 @@ internal static class Program
         }
 
         LevelImageMetadata? metadata = null;
-        if (totalLemmings.HasValue || requiredToSave.HasValue || spawnIntervalTicks.HasValue || builderUses.HasValue || diggerUses.HasValue || basherUses.HasValue || minerUses.HasValue)
+        if (totalLemmings.HasValue || requiredToSave.HasValue || spawnIntervalTicks.HasValue || builderUses.HasValue || diggerUses.HasValue || basherUses.HasValue || minerUses.HasValue || bomberUses.HasValue)
         {
             metadata = new LevelImageMetadata
             {
@@ -135,7 +145,8 @@ internal static class Program
                 BuilderUses = builderUses,
                 DiggerUses = diggerUses,
                 BasherUses = basherUses,
-                MinerUses = minerUses
+                MinerUses = minerUses,
+                BomberUses = bomberUses
             };
         }
 
@@ -184,6 +195,7 @@ internal static class Program
         Console.WriteLine("  --diggers N           Digger ability uses available");
         Console.WriteLine("  --bashers N           Basher ability uses available");
         Console.WriteLine("  --miners N            Miner ability uses available");
+        Console.WriteLine("  --bombers N           Bomber ability uses available");
     }
 
     private static bool TryReadOptionValue(

@@ -12,6 +12,7 @@ public sealed class Lemming
     private float _diggerTimer;
     private float _basherTimer;
     private float _minerTimer;
+    private float _bombTimer;
 
     public Lemming(Vector2 position, bool facingRight = true)
         : this(position, facingRight, LemmingSettings.Default)
@@ -34,6 +35,8 @@ public sealed class Lemming
     public float Width => _settings.Width;
     public float Height => _settings.Height;
     public LemmingAbility Ability { get; private set; } = LemmingAbility.Walker;
+    public bool IsBombing { get; private set; }
+    public int BombCountdown => IsBombing ? Math.Clamp((int)MathF.Ceiling(_bombTimer) - 1, 0, 5) : 0;
 
     public void Update(World world, float deltaSeconds)
     {
@@ -50,6 +53,20 @@ public sealed class Lemming
         if (deltaSeconds <= 0f)
         {
             return;
+        }
+
+        if (IsBombing)
+        {
+            if (UpdateBomb(world, deltaSeconds))
+            {
+                return;
+            }
+
+            if (BombCountdown == 0)
+            {
+                Velocity = Vector2.Zero;
+                return;
+            }
         }
 
         if (Ability == LemmingAbility.Builder)
@@ -226,6 +243,18 @@ public sealed class Lemming
         return true;
     }
 
+    public bool TryStartBomber()
+    {
+        if (!IsAlive || IsBombing)
+        {
+            return false;
+        }
+
+        IsBombing = true;
+        _bombTimer = 6f;
+        return true;
+    }
+
     public bool HasBuilderSupport(World world)
     {
         if (!IsAlive)
@@ -368,6 +397,12 @@ public sealed class Lemming
     {
         Ability = LemmingAbility.Walker;
         _minerTimer = 0f;
+    }
+
+    private void StopBombing()
+    {
+        IsBombing = false;
+        _bombTimer = 0f;
     }
 
     private void UpdateBuilder(World world, float deltaSeconds)
@@ -636,6 +671,52 @@ public sealed class Lemming
         IsGrounded = CheckGrounded(world);
         _fallDistance = 0f;
         return true;
+    }
+
+    private bool UpdateBomb(World world, float deltaSeconds)
+    {
+        _bombTimer -= deltaSeconds;
+        if (_bombTimer > 0f)
+        {
+            return false;
+        }
+
+        Explode(world);
+        return true;
+    }
+
+    private void Explode(World world)
+    {
+        var centerX = Position.X + (Width * 0.5f);
+        var centerY = Position.Y + (Height * 0.5f);
+        var radius = MathF.Max(2f, MathF.Ceiling(MathF.Max(Width, Height) * 2f));
+        var radiusSquared = radius * radius;
+
+        var minX = (int)MathF.Floor(centerX - radius);
+        var maxX = (int)MathF.Ceiling(centerX + radius);
+        var minY = (int)MathF.Floor(centerY - radius);
+        var maxY = (int)MathF.Ceiling(centerY + radius);
+
+        for (var y = minY; y <= maxY; y++)
+        {
+            for (var x = minX; x <= maxX; x++)
+            {
+                if (!world.InBounds(x, y))
+                {
+                    continue;
+                }
+
+                var dx = (x + 0.5f) - centerX;
+                var dy = (y + 0.5f) - centerY;
+                if ((dx * dx) + (dy * dy) <= radiusSquared)
+                {
+                    world.SetTile(x, y, TileType.Empty);
+                }
+            }
+        }
+
+        StopBombing();
+        IsAlive = false;
     }
 
     private bool CheckGrounded(World world)

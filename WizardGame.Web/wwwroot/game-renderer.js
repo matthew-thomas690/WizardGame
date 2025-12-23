@@ -27,6 +27,7 @@ export function init(hostElement, cellSize) {
         terrainSprites: [],
         overlaySprites: [],
         lemmingSprites: [],
+        bombTextSprites: [],
         textures: createTextures(app, adjustedCellSize),
         containers: {
             terrain: new window.PIXI.Container(),
@@ -43,6 +44,10 @@ export function init(hostElement, cellSize) {
         overlayTileWidth: 0,
         overlayTileHeight: 0,
         clearedTiles: null,
+        prevSolids: null,
+        rafHandle: 0,
+        rafActive: false,
+        lastFrameTime: 0,
         clickHandler: null,
         clickTarget: null
     };
@@ -67,7 +72,7 @@ export function renderState(hostElement, renderState) {
 
     ensureGrid(state, width, height);
     updateTerrain(state, renderState.tiles);
-    updateOverlayImagePixels(state, renderState.lemmings);
+    updateOverlayImagePixels(state, renderState.tiles, renderState.lemmings);
     updateOverlay(state, renderState.spawns, renderState.exits);
     updateLemmings(state, renderState.lemmings);
 }
@@ -109,6 +114,7 @@ export function setOverlayImage(hostElement, base64, mimeType) {
         state.overlayTileWidth = 0;
         state.overlayTileHeight = 0;
         state.clearedTiles = null;
+        state.prevSolids = null;
         resizeOverlayImage(state);
     };
 
@@ -164,6 +170,53 @@ export function unregisterClickHandler(hostElement) {
     state.clickTarget = null;
 }
 
+export function startRenderLoop(hostElement, dotNetRef) {
+    const state = hostElement.__pixiState;
+    if (!state || !dotNetRef) {
+        return;
+    }
+
+    stopRenderLoop(hostElement);
+    state.rafActive = true;
+    state.lastFrameTime = 0;
+
+    const step = (time) => {
+        if (!state.rafActive) {
+            return;
+        }
+
+        if (!state.lastFrameTime) {
+            state.lastFrameTime = time;
+        }
+
+        const deltaSeconds = Math.max(0, (time - state.lastFrameTime) / 1000);
+        state.lastFrameTime = time;
+
+        const invoke = dotNetRef.invokeMethodAsync('OnAnimationFrame', deltaSeconds);
+        if (invoke && typeof invoke.catch === 'function') {
+            invoke.catch(() => {});
+        }
+
+        state.rafHandle = window.requestAnimationFrame(step);
+    };
+
+    state.rafHandle = window.requestAnimationFrame(step);
+}
+
+export function stopRenderLoop(hostElement) {
+    const state = hostElement.__pixiState;
+    if (!state || !state.rafActive) {
+        return;
+    }
+
+    state.rafActive = false;
+    if (state.rafHandle) {
+        window.cancelAnimationFrame(state.rafHandle);
+        state.rafHandle = 0;
+    }
+    state.lastFrameTime = 0;
+}
+
 function createTextures(app, cellSize) {
     const makeRect = (color, alpha = 1) => {
         const graphics = new window.PIXI.Graphics();
@@ -190,6 +243,7 @@ function ensureGrid(state, width, height) {
     state.width = width;
     state.height = height;
     state.clearedTiles = null;
+    state.prevSolids = null;
     state.overlayTileWidth = 0;
     state.overlayTileHeight = 0;
 
@@ -232,7 +286,7 @@ function updateTerrain(state, rows) {
     }
 }
 
-function updateOverlayImagePixels(state, lemmings) {
+function updateOverlayImagePixels(state, rows, lemmings) {
     if (!state.overlayImageSprite || !state.overlayCanvas || !state.overlayContext || !state.overlayImageData) {
         return;
     }
@@ -259,9 +313,33 @@ function updateOverlayImagePixels(state, lemmings) {
     if (!state.clearedTiles || state.clearedTiles.length !== width * height) {
         state.clearedTiles = new Array(width * height).fill(false);
     }
+    if (!state.prevSolids || state.prevSolids.length !== width * height) {
+        state.prevSolids = new Array(width * height).fill(false);
+        for (let y = 0; y < height; y++) {
+            const row = rows[y] || '';
+            for (let x = 0; x < width; x++) {
+                state.prevSolids[(y * width) + x] = row[x] === '#';
+            }
+        }
+    }
 
     const data = state.overlayImageData.data;
     let didChange = false;
+
+    for (let y = 0; y < height; y++) {
+        const row = rows[y] || '';
+        for (let x = 0; x < width; x++) {
+            const index = (y * width) + x;
+            const wasSolid = state.prevSolids[index];
+            const isSolid = row[x] === '#';
+            if (wasSolid && !isSolid && !state.clearedTiles[index]) {
+                state.clearedTiles[index] = true;
+                clearTilePixels(state, data, x, y, tileW, tileH);
+                didChange = true;
+            }
+            state.prevSolids[index] = isSolid;
+        }
+    }
 
     if (Array.isArray(lemmings)) {
         const epsilon = 0.001;
@@ -350,11 +428,19 @@ function updateLemmings(state, lemmings) {
         state.containers.lemmings.addChild(sprite);
         state.lemmingSprites.push(sprite);
     }
+    while (state.bombTextSprites.length < count) {
+        const text = new window.PIXI.Text('', { fontFamily: 'Arial', fill: 0xffffff, fontWeight: 'bold' });
+        text.anchor.set(0.5, 1);
+        state.containers.lemmings.addChild(text);
+        state.bombTextSprites.push(text);
+    }
 
     for (let i = 0; i < state.lemmingSprites.length; i++) {
         const sprite = state.lemmingSprites[i];
+        const text = state.bombTextSprites[i];
         if (i >= count) {
             sprite.visible = false;
+            text.visible = false;
             continue;
         }
 
@@ -364,6 +450,23 @@ function updateLemmings(state, lemmings) {
         sprite.y = lemming.y * state.cellSize;
         sprite.width = lemming.width * state.cellSize;
         sprite.height = lemming.height * state.cellSize;
+
+        const countdown = lemming.bombCountdown ?? 0;
+        if (countdown > 0) {
+            const fontSize = Math.max(10, lemming.height * state.cellSize * 0.6);
+            text.text = String(countdown);
+            text.style = new window.PIXI.TextStyle({
+                fontFamily: 'Arial',
+                fill: 0xffffff,
+                fontWeight: 'bold',
+                fontSize
+            });
+            text.visible = true;
+            text.x = sprite.x + (sprite.width * 0.5);
+            text.y = sprite.y - 2;
+        } else {
+            text.visible = false;
+        }
     }
 }
 

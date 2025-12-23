@@ -305,6 +305,11 @@ public static class LevelImageConverter
             throw new ArgumentOutOfRangeException(nameof(metadata), "Miner uses cannot be negative.");
         }
 
+        if (metadata.BomberUses.HasValue && metadata.BomberUses < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(metadata), "Bomber uses cannot be negative.");
+        }
+
         if (metadata.TotalLemmings.HasValue
             && metadata.RequiredToSave.HasValue
             && metadata.RequiredToSave > metadata.TotalLemmings)

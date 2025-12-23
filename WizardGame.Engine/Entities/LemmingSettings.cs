@@ -13,7 +13,7 @@ public readonly record struct LemmingSettings(
     float BasherStepIntervalSeconds,
     float MinerStepIntervalSeconds)
 {
-    public static LemmingSettings Default => new(32f, 96f, 6f, 1, 3f, 3f, 12, 0.2f, 0.1f, 0.1f, 0.1f);
+    public static LemmingSettings Default => new(8f, 48f, 6f, 1, 3f, 3f, 12, 0.6f, 0.4f, 0.4f, 0.4f);
 
     public void Validate()
     {

@@ -18,7 +18,8 @@ public sealed class Level
         int builderUses,
         int diggerUses,
         int basherUses,
-        int minerUses)
+        int minerUses,
+        int bomberUses)
     {
         if (totalLemmings <= 0)
         {
@@ -60,6 +61,11 @@ public sealed class Level
             throw new ArgumentOutOfRangeException(nameof(minerUses));
         }
 
+        if (bomberUses < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bomberUses));
+        }
+
         World = world ?? throw new ArgumentNullException(nameof(world));
         _spawnPoints = new List<Vector2>(spawnPoints ?? throw new ArgumentNullException(nameof(spawnPoints)));
         _exitTiles = new List<GridPoint>(exitTiles ?? throw new ArgumentNullException(nameof(exitTiles)));
@@ -71,6 +77,7 @@ public sealed class Level
         DiggerUses = diggerUses;
         BasherUses = basherUses;
         MinerUses = minerUses;
+        BomberUses = bomberUses;
     }
 
     public World World { get; }
@@ -83,6 +90,7 @@ public sealed class Level
     public int DiggerUses { get; }
     public int BasherUses { get; }
     public int MinerUses { get; }
+    public int BomberUses { get; }
     public int Width => World.Width;
     public int Height => World.Height;
 

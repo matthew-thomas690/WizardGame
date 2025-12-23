@@ -18,7 +18,7 @@
         </div>
         <div class="game-controls">
             <div class="control-row">
-                <span>Speed: x@SpeedMultiplier</span>
+                <span>Speed: <strong>x@(SpeedMultiplier)</strong></span>
                 <button class="control-button" @onclick="DecreaseSpeed" disabled="@(_speedIndex == 0)">Slower</button>
                 <button class="control-button" @onclick="IncreaseSpeed" disabled="@(_speedIndex == SpeedMultipliers.Length - 1)">Faster</button>
             </div>
@@ -54,6 +54,14 @@
                     Miner
                 </button>
             </div>
+            <div class="control-row">
+                <span>Bomber uses: @_state.BombersRemaining / @_state.Level.BomberUses</span>
+                <button class="control-button @GetBomberButtonClass()"
+                        @onclick="SelectBomber"
+                        disabled="@(_state.BombersRemaining <= 0)">
+                    Bomber
+                </button>
+            </div>
         </div>
     }
     @if (!string.IsNullOrWhiteSpace(_error))
@@ -69,11 +77,10 @@
     private const int DefaultCellSize = 24;
     private static readonly TimeSpan Step = TimeSpan.FromSeconds(1.0 / TicksPerSecond);
     private static readonly int[] SpeedMultipliers = { 1, 2, 4, 6, 8, 12, 16, 24 };
+    private const int MaxStepsPerFrame = 60;
 
     private ElementReference _host;
     private IJSObjectReference? _module;
-    private PeriodicTimer? _timer;
-    private CancellationTokenSource _cts = new();
     private Game? _game;
     private GameState? _state;
     private long _tick;
@@ -81,6 +88,7 @@
     private DotNetObjectReference<Home>? _dotNetRef;
     private AbilitySelection _selectedAbility;
     private int _speedIndex;
+    private double _accumulatorSeconds;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -119,8 +127,7 @@
 
             _dotNetRef = DotNetObjectReference.Create(this);
             await _module.InvokeVoidAsync("registerClickHandler", _host, _dotNetRef);
-            _timer = new PeriodicTimer(Step);
-            _ = RunLoopAsync(_cts.Token);
+            await _module.InvokeVoidAsync("startRenderLoop", _host, _dotNetRef);
         }
         catch (Exception ex)
         {
@@ -129,29 +136,38 @@
         }
     }
 
-    private async Task RunLoopAsync(CancellationToken token)
+    [JSInvokable]
+    public async Task OnAnimationFrame(double deltaSeconds)
     {
-        if (_game == null || _state == null || _module == null || _timer == null)
+        if (_game == null || _state == null || _module == null)
         {
             return;
         }
 
-        while (await _timer.WaitForNextTickAsync(token))
+        var frameSeconds = Math.Min(Math.Max(deltaSeconds, 0.0), 0.25);
+        _accumulatorSeconds += frameSeconds * SpeedMultiplier;
+
+        var stepSeconds = Step.TotalSeconds;
+        var steps = 0;
+        while (_accumulatorSeconds >= stepSeconds && steps < MaxStepsPerFrame)
         {
-            var steps = SpeedMultiplier;
-            for (var stepIndex = 0; stepIndex < steps; stepIndex++)
-            {
-                _game.Update(new GameTime(_tick, Step), InputState.None);
-                _tick++;
-            }
+            _game.Update(new GameTime(_tick, Step), InputState.None);
+            _tick++;
+            _accumulatorSeconds -= stepSeconds;
+            steps++;
+        }
 
-            var renderState = BuildRenderState(_state);
-            await _module.InvokeVoidAsync("renderState", _host, renderState);
+        if (steps == MaxStepsPerFrame)
+        {
+            _accumulatorSeconds = 0;
+        }
 
-            if (_tick % 10 == 0)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+        var renderState = BuildRenderState(_state);
+        await _module.InvokeVoidAsync("renderState", _host, renderState);
+
+        if (_tick % 10 == 0)
+        {
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -250,7 +266,8 @@
                 lemming.Height,
                 lemming.Ability == LemmingAbility.Digger,
                 lemming.Ability == LemmingAbility.Basher,
-                lemming.Ability == LemmingAbility.Miner);
+                lemming.Ability == LemmingAbility.Miner,
+                lemming.BombCountdown);
         }
 
         return new RenderStateDto(world.Width, world.Height, tiles, spawns, exits, lemmings);
@@ -258,11 +275,9 @@
 
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
-        _timer?.Dispose();
-
         if (_module != null)
         {
+            await _module.InvokeVoidAsync("stopRenderLoop", _host);
             if (_dotNetRef is not null)
             {
                 await _module.InvokeVoidAsync("unregisterClickHandler", _host);
@@ -272,12 +287,11 @@
         }
 
         _dotNetRef?.Dispose();
-        _cts.Dispose();
     }
 
     private sealed record RenderStateDto(int Width, int Height, string[] Tiles, PointDto[] Spawns, PointDto[] Exits, LemmingDto[] Lemmings);
     private readonly record struct PointDto(int X, int Y);
-    private readonly record struct LemmingDto(float X, float Y, float Width, float Height, bool IsDigger, bool IsBasher, bool IsMiner);
+    private readonly record struct LemmingDto(float X, float Y, float Width, float Height, bool IsDigger, bool IsBasher, bool IsMiner, int BombCountdown);
 
     private void SelectBuilder()
     {
@@ -351,6 +365,24 @@
         return _selectedAbility == AbilitySelection.Miner ? "control-button-selected" : string.Empty;
     }
 
+    private void SelectBomber()
+    {
+        if (_state is null || _state.BombersRemaining <= 0)
+        {
+            _selectedAbility = AbilitySelection.None;
+            return;
+        }
+
+        _selectedAbility = _selectedAbility == AbilitySelection.Bomber
+            ? AbilitySelection.None
+            : AbilitySelection.Bomber;
+    }
+
+    private string GetBomberButtonClass()
+    {
+        return _selectedAbility == AbilitySelection.Bomber ? "control-button-selected" : string.Empty;
+    }
+
     [JSInvokable]
     public Task HandleCanvasClick(float worldX, float worldY)
     {
@@ -365,12 +397,12 @@
             AbilitySelection.Digger => _state.TryAssignDiggerAt(worldX, worldY),
             AbilitySelection.Basher => _state.TryAssignBasherAt(worldX, worldY),
             AbilitySelection.Miner => _state.TryAssignMinerAt(worldX, worldY),
+            AbilitySelection.Bomber => _state.TryAssignBomberAt(worldX, worldY),
             _ => false
         };
 
         if (assigned)
         {
-            _selectedAbility = AbilitySelection.None;
             return InvokeAsync(StateHasChanged);
         }
 
@@ -383,7 +415,8 @@
         Builder,
         Digger,
         Basher,
-        Miner
+        Miner,
+        Bomber
     }
 
     private int SpeedMultiplier => SpeedMultipliers[_speedIndex];

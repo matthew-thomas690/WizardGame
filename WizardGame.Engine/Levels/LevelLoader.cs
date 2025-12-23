@@ -136,8 +136,9 @@ public static class LevelLoader
         var diggerUses = data.Metadata?.DiggerUses ?? 0;
         var basherUses = data.Metadata?.BasherUses ?? 0;
         var minerUses = data.Metadata?.MinerUses ?? 0;
+        var bomberUses = data.Metadata?.BomberUses ?? 0;
 
-        return new Level(world, spawnPoints, exitTiles, totalLemmings, requiredToSave, spawnIntervalTicks, builderUses, diggerUses, basherUses, minerUses);
+        return new Level(world, spawnPoints, exitTiles, totalLemmings, requiredToSave, spawnIntervalTicks, builderUses, diggerUses, basherUses, minerUses, bomberUses);
     }
 
     private static void EnsureInBounds(GridPoint point, int width, int height, string label)

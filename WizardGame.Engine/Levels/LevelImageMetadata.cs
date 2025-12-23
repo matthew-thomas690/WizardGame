@@ -9,4 +9,5 @@ public sealed class LevelImageMetadata
     public int? DiggerUses { get; init; }
     public int? BasherUses { get; init; }
     public int? MinerUses { get; init; }
+    public int? BomberUses { get; init; }
 }
