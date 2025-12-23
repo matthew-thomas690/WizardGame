@@ -1,0 +1,406 @@
+@page "/"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject HttpClient Http
+
+<PageTitle>WizardGame</PageTitle>
+
+<div class="game-page">
+    <div class="game-header">
+        <h1>WizardGame</h1>
+        <p>PixiJS WebGL renderer prototype.</p>
+    </div>
+    @if (_state is not null)
+    {
+        <div class="game-stats">
+            <div><strong>Spawned:</strong> @_state.Spawned / @_state.TotalToSpawn</div>
+            <div><strong>Saved:</strong> @_state.Escaped / @_state.RequiredToSave</div>
+        </div>
+        <div class="game-controls">
+            <div class="control-row">
+                <span>Speed: x@SpeedMultiplier</span>
+                <button class="control-button" @onclick="DecreaseSpeed" disabled="@(_speedIndex == 0)">Slower</button>
+                <button class="control-button" @onclick="IncreaseSpeed" disabled="@(_speedIndex == SpeedMultipliers.Length - 1)">Faster</button>
+            </div>
+            <div class="control-row">
+                <span>Builder uses: @_state.BuildersRemaining / @_state.Level.BuilderUses</span>
+                <button class="control-button @GetBuilderButtonClass()"
+                        @onclick="SelectBuilder"
+                        disabled="@(_state.BuildersRemaining <= 0)">
+                    Builder
+                </button>
+            </div>
+            <div class="control-row">
+                <span>Digger uses: @_state.DiggersRemaining / @_state.Level.DiggerUses</span>
+                <button class="control-button @GetDiggerButtonClass()"
+                        @onclick="SelectDigger"
+                        disabled="@(_state.DiggersRemaining <= 0)">
+                    Digger
+                </button>
+            </div>
+            <div class="control-row">
+                <span>Basher uses: @_state.BashersRemaining / @_state.Level.BasherUses</span>
+                <button class="control-button @GetBasherButtonClass()"
+                        @onclick="SelectBasher"
+                        disabled="@(_state.BashersRemaining <= 0)">
+                    Basher
+                </button>
+            </div>
+            <div class="control-row">
+                <span>Miner uses: @_state.MinersRemaining / @_state.Level.MinerUses</span>
+                <button class="control-button @GetMinerButtonClass()"
+                        @onclick="SelectMiner"
+                        disabled="@(_state.MinersRemaining <= 0)">
+                    Miner
+                </button>
+            </div>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="game-error">@_error</div>
+    }
+    <div class="game-host" @ref="_host"></div>
+</div>
+
+@code {
+    private const int TicksPerSecond = 60;
+    private const string DefaultLevelPath = "levels/level1.level";
+    private const int DefaultCellSize = 24;
+    private static readonly TimeSpan Step = TimeSpan.FromSeconds(1.0 / TicksPerSecond);
+    private static readonly int[] SpeedMultipliers = { 1, 2, 4, 6, 8, 12, 16, 24 };
+
+    private ElementReference _host;
+    private IJSObjectReference? _module;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource _cts = new();
+    private Game? _game;
+    private GameState? _state;
+    private long _tick;
+    private string? _error;
+    private DotNetObjectReference<Home>? _dotNetRef;
+    private AbilitySelection _selectedAbility;
+    private int _speedIndex;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var loadResult = await LoadLevelAsync();
+            var level = loadResult.Level;
+            var cellSize = ResolveCellSize(loadResult);
+
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./game-renderer.js");
+            await _module.InvokeVoidAsync("init", _host, cellSize);
+
+            if (loadResult.ImageData is not null
+                && !string.IsNullOrWhiteSpace(loadResult.ImageData.OverlayImageBase64))
+            {
+                await _module.InvokeVoidAsync(
+                    "setOverlayImage",
+                    _host,
+                    loadResult.ImageData.OverlayImageBase64,
+                    loadResult.ImageData.OverlayImageMimeType);
+            }
+
+            var lemmingSettings = LemmingSettings.Default with
+            {
+                Width = 4f,
+                Height = 4f
+            };
+
+            _state = new GameState(level, lemmingSettings);
+            _game = new Game(_state);
+
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("registerClickHandler", _host, _dotNetRef);
+            _timer = new PeriodicTimer(Step);
+            _ = RunLoopAsync(_cts.Token);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Renderer failed: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RunLoopAsync(CancellationToken token)
+    {
+        if (_game == null || _state == null || _module == null || _timer == null)
+        {
+            return;
+        }
+
+        while (await _timer.WaitForNextTickAsync(token))
+        {
+            var steps = SpeedMultiplier;
+            for (var stepIndex = 0; stepIndex < steps; stepIndex++)
+            {
+                _game.Update(new GameTime(_tick, Step), InputState.None);
+                _tick++;
+            }
+
+            var renderState = BuildRenderState(_state);
+            await _module.InvokeVoidAsync("renderState", _host, renderState);
+
+            if (_tick % 10 == 0)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task<LevelLoadResult> LoadLevelAsync()
+    {
+        var levelPath = DefaultLevelPath;
+        var text = await TryLoadTextAsync(levelPath);
+        if (text is null)
+        {
+            levelPath = "levels/level1.txt";
+            text = await TryLoadTextAsync(levelPath);
+        }
+
+        if (text is null)
+        {
+            throw new InvalidOperationException($"Unable to load level from '{DefaultLevelPath}'.");
+        }
+
+        return LevelLoader.LoadFromContent(text, System.IO.Path.GetExtension(levelPath));
+    }
+
+    private static int ResolveCellSize(LevelLoadResult result)
+    {
+        var imageData = result.ImageData;
+        if (imageData is null)
+        {
+            return DefaultCellSize;
+        }
+
+        if (imageData.SourceImageWidth > 0 && result.Level.Width > 0)
+        {
+            var computed = imageData.SourceImageWidth / result.Level.Width;
+            if (computed > 0)
+            {
+                return computed;
+            }
+        }
+
+        if (imageData.TileSize > 0)
+        {
+            return imageData.TileSize;
+        }
+
+        return DefaultCellSize;
+    }
+
+    private async Task<string?> TryLoadTextAsync(string path)
+    {
+        try
+        {
+            return await Http.GetStringAsync(path);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    private static RenderStateDto BuildRenderState(GameState state)
+    {
+        var world = state.World;
+        var tiles = new string[world.Height];
+
+        for (var y = 0; y < world.Height; y++)
+        {
+            var row = new char[world.Width];
+            for (var x = 0; x < world.Width; x++)
+            {
+                row[x] = world.GetTile(x, y) == TileType.Solid ? '#' : '.';
+            }
+            tiles[y] = new string(row);
+        }
+
+        var spawns = new PointDto[state.Level.SpawnPoints.Count];
+        for (var i = 0; i < spawns.Length; i++)
+        {
+            var point = state.Level.SpawnPoints[i];
+            spawns[i] = new PointDto((int)MathF.Floor(point.X), (int)MathF.Floor(point.Y));
+        }
+
+        var exits = new PointDto[state.Level.ExitTiles.Count];
+        for (var i = 0; i < exits.Length; i++)
+        {
+            var exit = state.Level.ExitTiles[i];
+            exits[i] = new PointDto(exit.X, exit.Y);
+        }
+
+        var lemmings = new LemmingDto[state.Lemmings.Count];
+        for (var i = 0; i < lemmings.Length; i++)
+        {
+            var lemming = state.Lemmings[i];
+            lemmings[i] = new LemmingDto(
+                lemming.Position.X,
+                lemming.Position.Y,
+                lemming.Width,
+                lemming.Height,
+                lemming.Ability == LemmingAbility.Digger,
+                lemming.Ability == LemmingAbility.Basher,
+                lemming.Ability == LemmingAbility.Miner);
+        }
+
+        return new RenderStateDto(world.Width, world.Height, tiles, spawns, exits, lemmings);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _timer?.Dispose();
+
+        if (_module != null)
+        {
+            if (_dotNetRef is not null)
+            {
+                await _module.InvokeVoidAsync("unregisterClickHandler", _host);
+            }
+
+            await _module.DisposeAsync();
+        }
+
+        _dotNetRef?.Dispose();
+        _cts.Dispose();
+    }
+
+    private sealed record RenderStateDto(int Width, int Height, string[] Tiles, PointDto[] Spawns, PointDto[] Exits, LemmingDto[] Lemmings);
+    private readonly record struct PointDto(int X, int Y);
+    private readonly record struct LemmingDto(float X, float Y, float Width, float Height, bool IsDigger, bool IsBasher, bool IsMiner);
+
+    private void SelectBuilder()
+    {
+        if (_state is null || _state.BuildersRemaining <= 0)
+        {
+            _selectedAbility = AbilitySelection.None;
+            return;
+        }
+
+        _selectedAbility = _selectedAbility == AbilitySelection.Builder
+            ? AbilitySelection.None
+            : AbilitySelection.Builder;
+    }
+
+    private string GetBuilderButtonClass()
+    {
+        return _selectedAbility == AbilitySelection.Builder ? "control-button-selected" : string.Empty;
+    }
+
+    private void SelectDigger()
+    {
+        if (_state is null || _state.DiggersRemaining <= 0)
+        {
+            _selectedAbility = AbilitySelection.None;
+            return;
+        }
+
+        _selectedAbility = _selectedAbility == AbilitySelection.Digger
+            ? AbilitySelection.None
+            : AbilitySelection.Digger;
+    }
+
+    private string GetDiggerButtonClass()
+    {
+        return _selectedAbility == AbilitySelection.Digger ? "control-button-selected" : string.Empty;
+    }
+
+    private void SelectBasher()
+    {
+        if (_state is null || _state.BashersRemaining <= 0)
+        {
+            _selectedAbility = AbilitySelection.None;
+            return;
+        }
+
+        _selectedAbility = _selectedAbility == AbilitySelection.Basher
+            ? AbilitySelection.None
+            : AbilitySelection.Basher;
+    }
+
+    private string GetBasherButtonClass()
+    {
+        return _selectedAbility == AbilitySelection.Basher ? "control-button-selected" : string.Empty;
+    }
+
+    private void SelectMiner()
+    {
+        if (_state is null || _state.MinersRemaining <= 0)
+        {
+            _selectedAbility = AbilitySelection.None;
+            return;
+        }
+
+        _selectedAbility = _selectedAbility == AbilitySelection.Miner
+            ? AbilitySelection.None
+            : AbilitySelection.Miner;
+    }
+
+    private string GetMinerButtonClass()
+    {
+        return _selectedAbility == AbilitySelection.Miner ? "control-button-selected" : string.Empty;
+    }
+
+    [JSInvokable]
+    public Task HandleCanvasClick(float worldX, float worldY)
+    {
+        if (_state is null || _selectedAbility == AbilitySelection.None)
+        {
+            return Task.CompletedTask;
+        }
+
+        var assigned = _selectedAbility switch
+        {
+            AbilitySelection.Builder => _state.TryAssignBuilderAt(worldX, worldY),
+            AbilitySelection.Digger => _state.TryAssignDiggerAt(worldX, worldY),
+            AbilitySelection.Basher => _state.TryAssignBasherAt(worldX, worldY),
+            AbilitySelection.Miner => _state.TryAssignMinerAt(worldX, worldY),
+            _ => false
+        };
+
+        if (assigned)
+        {
+            _selectedAbility = AbilitySelection.None;
+            return InvokeAsync(StateHasChanged);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private enum AbilitySelection
+    {
+        None,
+        Builder,
+        Digger,
+        Basher,
+        Miner
+    }
+
+    private int SpeedMultiplier => SpeedMultipliers[_speedIndex];
+
+    private void IncreaseSpeed()
+    {
+        if (_speedIndex < SpeedMultipliers.Length - 1)
+        {
+            _speedIndex++;
+        }
+    }
+
+    private void DecreaseSpeed()
+    {
+        if (_speedIndex > 0)
+        {
+            _speedIndex--;
+        }
+    }
+}

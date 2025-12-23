@@ -1,0 +1,12 @@
+C:\src\WizardGame\WizardGame.Engine\bin\Debug\net9.0\WizardGame.Engine.deps.json
+C:\src\WizardGame\WizardGame.Engine\bin\Debug\net9.0\WizardGame.Engine.dll
+C:\src\WizardGame\WizardGame.Engine\bin\Debug\net9.0\WizardGame.Engine.pdb
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.GeneratedMSBuildEditorConfig.editorconfig
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.AssemblyInfoInputs.cache
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.AssemblyInfo.cs
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.csproj.CoreCompileInputs.cache
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.dll
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\refint\WizardGame.Engine.dll
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.pdb
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\ref\WizardGame.Engine.dll
+C:\src\WizardGame\WizardGame.Engine\obj\Debug\net9.0\WizardGame.Engine.csproj.AssemblyReference.cache
