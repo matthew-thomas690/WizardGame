@@ -1,0 +1,13 @@
+{
+  "name": "wizardgame-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Client library management for WizardGame.Web.",
+  "scripts": {
+    "install:libs": "node scripts/copy-client-libs.js"
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.3",
+    "pixi.js": "^7.4.0"
+  }
+}
